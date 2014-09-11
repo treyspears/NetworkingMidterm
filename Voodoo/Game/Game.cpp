@@ -5,7 +5,7 @@
 #define LOCAL_PORT "0"
 
 #define STARTING_SERVER_IP "127.0.0.1"
-#define STARTING_SERVER_PORT "7000"
+#define STARTING_SERVER_PORT "6665"
 
 #include "Game.hpp"
 
@@ -47,7 +47,7 @@ const float SEND_MAX_DELAY = 1.f;
 
 const playerID PLAYER_ID( 255, 127, 55 );
 const Vector2f INITIAL_PLAYER_POSITION( 0.f, 0.f );
-const float PLAYER_SPEED = 10.f;
+const float PLAYER_SPEED = 50.f;
 
 FMOD::System* Game::m_soundSystem = nullptr;
 FMOD::Sound *test = nullptr;
@@ -341,8 +341,14 @@ void Game::ProcessInput()
 		}
 
 		Clock& clock = Clock::GetMasterClock();
+		float speed = PLAYER_SPEED;
 
-		g_localPlayer.currentPos += movementVector * PLAYER_SPEED * static_cast< float >( clock.m_currentDeltaSeconds );
+		if( g_localPlayer.isIt )
+		{
+			speed *= 1.25f;
+		}
+
+		g_localPlayer.currentPos += movementVector * speed * static_cast< float >( clock.m_currentDeltaSeconds );
 
 		if( movementVector != Vector2f::Zero() )
 		{
@@ -467,7 +473,7 @@ void Game::PotentiallyRequestGameStartFromServer()
 	ZeroMemory( &requestGameStartPacket, sizeof( requestGameStartPacket ) );
 
 	requestGameStartPacket.packetType = TYPE_Acknowledge;
-	requestGameStartPacket.data.acknowledged.packetType = TYPE_GameStart;
+	requestGameStartPacket.data.acknowledged.packetType = TYPE_Acknowledge;
 
 	UDPSendMessageToServer( sendToServerSocket, UDPServerAddressInfo, ( char* )&requestGameStartPacket, sizeof( CS6Packet ) );
 
@@ -482,6 +488,21 @@ void Game::PotentiallySendUpdatePacketToServer()
 	{
 		return;
 	}
+
+	CS6Packet updatePacket;
+
+	ZeroMemory( &updatePacket, sizeof( updatePacket ) );
+
+	updatePacket.packetType = TYPE_Update;
+	updatePacket.data.updated.xPosition = g_localPlayer.currentPos.x;
+	updatePacket.data.updated.yPosition = g_localPlayer.currentPos.y;
+
+	updatePacket.data.updated.xVelocity = g_localPlayer.currentVelocity.x;
+	updatePacket.data.updated.yVelocity = g_localPlayer.currentVelocity.y;
+
+	updatePacket.data.updated.yawDegrees = g_localPlayer.orientationAsDegrees;
+
+	UDPSendMessageToServer( sendToServerSocket, UDPServerAddressInfo, ( char* )&updatePacket, sizeof( updatePacket ) );
 
 	g_currentElapsedTimeToSendToServer = 0.f;
 }
@@ -783,10 +804,10 @@ void ProcessPacket( const CS6Packet& packet )
 //-----------------------------------------------------------------------------------------------
 void OnReceiveUpdate( const CS6Packet& bufferAsPacket )
 {
-	if( ( int )bufferAsPacket.packetNumber < g_currentReceivedPacketCount )
-	{
-		return;
-	}
+	//if( ( int )bufferAsPacket.packetNumber < g_currentReceivedPacketCount )
+	//{
+	//	return;
+	//}
 
 	playerID idFromPacket( bufferAsPacket.playerColorAndID[ 0 ], bufferAsPacket.playerColorAndID[ 1 ], bufferAsPacket.playerColorAndID[ 2 ] );
 
@@ -824,12 +845,20 @@ void OnReceiveUpdate( const CS6Packet& bufferAsPacket )
 		newPlayer.currentPos = newPosition;
 		newPlayer.currentVelocity = newVelocity;
 		newPlayer.orientationAsDegrees = newOrientationDegrees;
+		newPlayer.id = idFromPacket;
 
 		if( idFromPacket == g_itPlayerID )
 		{
 			newPlayer.isIt = true;
 			g_itPlayerID = BAD_COLOR;
 		}
+
+		g_players.push_back( newPlayer );
+	}
+	else if( idFromPacket == g_itPlayerID )
+	{
+		g_localPlayer.isIt = true;
+		g_itPlayerID = BAD_COLOR;
 	}
 }
 
