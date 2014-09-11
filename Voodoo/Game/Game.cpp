@@ -32,60 +32,8 @@
 
 #pragma comment( lib, "WS2_32" ) // Link in the WS2_32.lib static library
 
-
+const playerID BAD_COLOR( 0, 0, 0 );
 //-----------------------------------------------------------------------------------------------
-
-struct playerID
-{
-	playerID()
-		: r( 0 )
-		, g( 0 )
-		, b( 0 )
-
-	{
-
-	}
-	playerID( unsigned char red, unsigned char green, unsigned char blue )
-		: r( red )
-		, g( green )
-		, b( blue )
-	{
-
-	}
-
-	bool operator==( const playerID& other )
-	{
-		return r == other.r && g == other.g && b == other.b;
-	}
-
-	unsigned char r;
-	unsigned char g;
-	unsigned char b;
-
-};
-
-struct player
-{
-	player()
-		: id()
-		, currentPos( Vector2f::Zero() )
-		, currentVelocity( Vector2f::Zero() )
-		, currentInterpolatedTime( 0.f )
-		, interpolationDuration( 0.f )
-		, orientationAsDegrees( 0.f )
-		, gamesWon( 0 )
-	{
-
-	}
-
-	playerID id;
-	Vector2f currentPos;
-	Vector2f currentVelocity;
-	float orientationAsDegrees;
-	float currentInterpolatedTime;
-	float interpolationDuration;
-	unsigned int gamesWon;
-};
 
 const int SCREEN_WIDTH = 500;
 const int SCREEN_HEIGHT = 500;
@@ -99,7 +47,7 @@ const float SEND_MAX_DELAY = 1.f;
 
 const playerID PLAYER_ID( 255, 127, 55 );
 const Vector2f INITIAL_PLAYER_POSITION( 0.f, 0.f );
-
+const float PLAYER_SPEED = 10.f;
 
 FMOD::System* Game::m_soundSystem = nullptr;
 FMOD::Sound *test = nullptr;
@@ -113,15 +61,11 @@ bool g_isDelayingInput = false;
 u_long BLOCKING = 0;
 u_long NON_BLOCKING = 1;
 
-
-player   g_localPlayer;
-Vector2f g_localPlayerLastPositionSent = Vector2f::Zero();
-Vector2f g_localLocationToRender = Vector2f::Zero();
-
-Vector2f g_flagPosition = Vector2f::Zero();
-
+player g_localPlayer;
+playerID g_itPlayerID = BAD_COLOR;
 std::vector< player > g_players;
 
+int g_currentReceivedPacketCount = 0;
 float g_currentElapsedTimeToSendToServer = 0.f;
 
 sockaddr_in UDPServerAddressInfo;
@@ -130,24 +74,30 @@ SOCKET sendToServerSocket = INVALID_SOCKET;
 std::string g_serverIPAsString = STARTING_SERVER_IP;
 std::string g_serverPortAsString = STARTING_SERVER_PORT;
 
+enum GameState
+{
+	STATE_NotStarted,
+	STATE_InGame,
+};
+
+GameState g_currentState = STATE_NotStarted;
+
 //-----------------------------------------------------------------------------------------------
 bool InitializeWinSocket();
 bool CreateAddressInfoForUDP( const std::string& ipAddress, const std::string& udpPort, sockaddr_in& udpAddressInfo );
 bool CreateUDPSocket( SOCKET& newSocket, sockaddr_in& addressInfo );
 bool BindSocket( SOCKET& socketToBind, sockaddr_in& addressInfo );
+bool ChangeServerInfo( const std::string& serverIP, const std::string& serverPort, sockaddr_in& UDPServerAddressInfo_out );
 
 bool UDPSendMessageToServer( const SOCKET& socketToSendThru, sockaddr_in& udpServerAddressInfo, const char* message, int messageLength );
+
 bool UDPClientRecieveMessage( const SOCKET& receiveFromSocket );
-bool ChangeServerInfo( const std::string& serverIP, const std::string& serverPort, sockaddr_in& UDPServerAddressInfo_out );
-void RenderPlayers();
-void RenderPlayer( player& playerToRender );
-
-CS6Packet CreatePacketFromBuffer( const char* buffer );
-void UpdateCurrentPlayer( player& playerToUpdate, float desiredX, float desiredY );
 void ProcessPacket( const CS6Packet& packet );
-
+void OnReceiveGameStart( const CS6Packet& packet );
 void OnReceiveReset( const CS6Packet& packet );
 void OnReceiveUpdate( const CS6Packet& buffer );
+void OnReceiveAck( const CS6Packet& bufferAsPacket );
+void OnReceiveVictory( const CS6Packet& bufferAsPacket );
 
 //-----------------------------------------------------------------------------------------------
 
@@ -177,7 +127,6 @@ Game::Game()
 	g_localPlayer.id.g = PLAYER_ID.g;
 	g_localPlayer.id.b = PLAYER_ID.b;
 	g_localPlayer.currentPos = INITIAL_PLAYER_POSITION;
-	g_localLocationToRender = INITIAL_PLAYER_POSITION;
 }
 
 //-----------------------------------------------------------------------------------------------
@@ -262,8 +211,22 @@ void Game::Update()
 	masterClock.AdvanceTime( timeNow - timeAtLastUpdate );
 
 	UDPClientRecieveMessage( sendToServerSocket );
-	UpdatePacketAndPotentiallySendToServer();
 
+	g_currentElapsedTimeToSendToServer += static_cast< float >( masterClock.m_currentDeltaSeconds );
+
+	if( g_currentState == STATE_NotStarted )
+	{
+		PotentiallyRequestGameStartFromServer();
+	}
+	if( g_currentState == STATE_InGame )
+	{
+		if( g_localPlayer.isIt )
+		{
+			CheckCollisionAndSendVictoryIfSuccessfulTag();
+		}
+		PotentiallySendUpdatePacketToServer();
+	}
+	
 	timeAtLastUpdate = timeNow;
 }
 
@@ -275,14 +238,17 @@ void Game::Render()
 	OpenGLRenderer::ClearColor( clearColor.x, clearColor.y, clearColor.z, clearColor.w );
 	OpenGLRenderer::Clear( GL_COLOR_BUFFER_BIT );
 
-	RenderPlayers();
-
+	if( g_currentState == STATE_InGame )
+	{	
+		RenderPlayers();
+	}
+	
 	ConsoleLog::s_currentLog->Render();
 	SwapBuffers( OpenGLRenderer::displayDeviceContext );
 }
 
 //-----------------------------------------------------------------------------------------------
-void RenderPlayers()
+void Game::RenderPlayers()
 {
 	RenderPlayer( g_localPlayer );
 
@@ -293,13 +259,18 @@ void RenderPlayers()
 }
 
 //-----------------------------------------------------------------------------------------------
-void RenderPlayer( player& playerToRender )
+void Game::RenderPlayer( player& playerToRender )
 {
 	Color renderColor;
 	Vector3f renderColorAsNormalizedVector;
 	Vector2f minPosition;
 	Vector2f maxPosition;
+	float offset = 10.f;
 
+	if( playerToRender.isIt )
+	{
+		offset = 15.f;
+	}
 
 	renderColor.r = playerToRender.id.r;
 	renderColor.g = playerToRender.id.g;
@@ -308,7 +279,7 @@ void RenderPlayer( player& playerToRender )
 
 	minPosition = playerToRender.currentPos;
 
-	maxPosition = Vector2f( minPosition.x + 10.f, minPosition.y + 10.f );
+	maxPosition = Vector2f( minPosition.x + offset, minPosition.y + offset );
 
 	OpenGLRenderer::UseShaderProgram( OpenGLRenderer::s_fixedFunctionPipelineShaderID );
 	OpenGLRenderer::Uniform1i( OpenGLRenderer::s_fixedFunctionUseTexturesUniformLocation, 0 );
@@ -327,8 +298,6 @@ void RenderPlayer( player& playerToRender )
 	}
 	OpenGLRenderer::s_rendererStack.Pop( MatrixStack44f::MODEL_STACK );
 }
-
-
 
 //-----------------------------------------------------------------------------------------------
 void Game::ProcessInput()
@@ -349,7 +318,7 @@ void Game::ProcessInput()
 	{
 		UpdateConsoleLogOnInput();
 	}
-	else
+	else if( g_currentState == STATE_InGame )
 	{
 		Vector2f movementVector = Vector2f::Zero();
 
@@ -371,12 +340,12 @@ void Game::ProcessInput()
 			movementVector += Vector2f( 1.f, 0.f );
 		}
 
-		g_localPlayer.currentPos += movementVector;
+		Clock& clock = Clock::GetMasterClock();
+
+		g_localPlayer.currentPos += movementVector * PLAYER_SPEED * static_cast< float >( clock.m_currentDeltaSeconds );
 
 		if( movementVector != Vector2f::Zero() )
 		{
-			Clock& clock = Clock::GetMasterClock();
-
 			std::string alarmName = "delayedInput";
 			Vector2f delayedMovement = Vector2f::Zero();
 
@@ -486,21 +455,78 @@ void Game::UpdateConsoleLogOnInput()
 }
 
 //-----------------------------------------------------------------------------------------------
-void Game::UpdatePacketAndPotentiallySendToServer()
+void Game::PotentiallyRequestGameStartFromServer()
 {
-	const Clock& masterClock = Clock::GetMasterClock();
-	g_currentElapsedTimeToSendToServer += static_cast< float >( masterClock.m_currentDeltaSeconds );
-
-	if( g_currentElapsedTimeToSendToServer >= SEND_FREQUENCY )
+	if( g_currentElapsedTimeToSendToServer < SEND_FREQUENCY )
 	{
-		SendSimplePacketToServer();
-		g_currentElapsedTimeToSendToServer = 0.f;
+		return;
 	}
+
+	CS6Packet requestGameStartPacket;
+
+	ZeroMemory( &requestGameStartPacket, sizeof( requestGameStartPacket ) );
+
+	requestGameStartPacket.packetType = TYPE_Acknowledge;
+	requestGameStartPacket.data.acknowledged.packetType = TYPE_GameStart;
+
+	UDPSendMessageToServer( sendToServerSocket, UDPServerAddressInfo, ( char* )&requestGameStartPacket, sizeof( CS6Packet ) );
+
+	g_currentElapsedTimeToSendToServer = 0.f;
+
 }
 
 //-----------------------------------------------------------------------------------------------
-void Game::SendSimplePacketToServer()
+void Game::PotentiallySendUpdatePacketToServer()
 {
+	if( g_currentElapsedTimeToSendToServer < SEND_FREQUENCY )
+	{
+		return;
+	}
+
+	g_currentElapsedTimeToSendToServer = 0.f;
+}
+
+//-----------------------------------------------------------------------------------------------
+void Game::CheckCollisionAndSendVictoryIfSuccessfulTag()
+{
+	const float DISTANCE_TO_TAG = 15.f;
+
+	if( g_currentElapsedTimeToSendToServer < SEND_FREQUENCY )
+	{
+		return;
+	}
+
+	//FUTURE EDIT, may need this.
+	//g_currentElapsedTimeToSendToServer = 0.f;
+
+	float distance = 0.f;
+
+	auto iter = g_players.begin();
+
+	for ( ; iter != g_players.end(); ++iter )
+	{
+		if( iter->id == g_localPlayer.id )
+		{
+			continue;
+		}
+		
+		distance = Vector2f::Distance( g_localPlayer.currentPos, iter->currentPos );
+
+		if( distance <= DISTANCE_TO_TAG )
+		{
+			CS6Packet victoryPacketToSendToServer;
+			ZeroMemory( &victoryPacketToSendToServer, sizeof( victoryPacketToSendToServer ) );
+
+			victoryPacketToSendToServer.packetType = TYPE_Victory;
+			victoryPacketToSendToServer.data.victorious.playerColorAndID[ 0 ] = iter->id.r;
+			victoryPacketToSendToServer.data.victorious.playerColorAndID[ 1 ] = iter->id.g;
+			victoryPacketToSendToServer.data.victorious.playerColorAndID[ 2 ] = iter->id.b;
+
+			UDPSendMessageToServer( sendToServerSocket, UDPServerAddressInfo, ( char* )&victoryPacketToSendToServer, sizeof( victoryPacketToSendToServer ) );
+
+			break;
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------------------------
@@ -681,6 +707,14 @@ bool UDPSendMessageToServer( const SOCKET& socketToSendThru, sockaddr_in& udpSer
 	return true;
 }
 
+
+//-----------------------------------------------------------------------------------------------
+bool ChangeServerInfo( const std::string& serverIP, const std::string& serverPort, sockaddr_in& UDPServerAddressInfo_out )
+{
+	return CreateAddressInfoForUDP( serverIP, serverPort, UDPServerAddressInfo_out );
+}
+
+
 //-----------------------------------------------------------------------------------------------
 bool UDPClientRecieveMessage( const SOCKET& receiveFromSocket )
 {
@@ -701,6 +735,7 @@ bool UDPClientRecieveMessage( const SOCKET& receiveFromSocket )
 
 		if( bytesReceived == sizeof( CS6Packet ) )
 		{
+			++g_currentReceivedPacketCount;
 			ProcessPacket( receivedPacket );
 		}
 
@@ -712,46 +747,191 @@ bool UDPClientRecieveMessage( const SOCKET& receiveFromSocket )
 		bytesReceived = WSAGetLastError();
 		return false;
 	}
-	
+
 	return true;
-}
-
-
-//-----------------------------------------------------------------------------------------------
-bool ChangeServerInfo( const std::string& serverIP, const std::string& serverPort, sockaddr_in& UDPServerAddressInfo_out )
-{
-	return CreateAddressInfoForUDP( serverIP, serverPort, UDPServerAddressInfo_out );
-}
-
-
-//-----------------------------------------------------------------------------------------------
-void OnReceiveUpdate( const CS6Packet& bufferAsPacket )
-{
-
-}
-
-
-//-----------------------------------------------------------------------------------------------
-CS6Packet CreatePacketFromBuffer( const char* buffer )
-{
-	CS6Packet* result = nullptr;
-
-	result = ( CS6Packet* )( buffer );
-
-	return *result;
-}
-
-//-----------------------------------------------------------------------------------------------
-void UpdateCurrentPlayer( player& playerToUpdate, float desiredX, float desiredY )
-{
-	playerToUpdate.currentPos.x = desiredX;
-	playerToUpdate.currentPos.y = desiredY;
 }
 
 
 //-----------------------------------------------------------------------------------------------
 void ProcessPacket( const CS6Packet& packet )
 {
+	PacketType typeOfPacket = packet.packetType;
 
+	if( typeOfPacket == TYPE_Update )
+	{
+		OnReceiveUpdate( packet );
+	}
+	else if( typeOfPacket == TYPE_GameStart )
+	{
+		OnReceiveGameStart( packet );
+	}
+	else if( typeOfPacket == TYPE_Reset )
+	{
+		OnReceiveReset( packet );
+	}
+	else if( typeOfPacket == TYPE_Acknowledge )
+	{
+		OnReceiveAck( packet );
+	}
+	else if( typeOfPacket == TYPE_Victory )
+	{
+		OnReceiveVictory( packet );
+	}
 }
+
+
+//-----------------------------------------------------------------------------------------------
+void OnReceiveUpdate( const CS6Packet& bufferAsPacket )
+{
+	if( ( int )bufferAsPacket.packetNumber < g_currentReceivedPacketCount )
+	{
+		return;
+	}
+
+	playerID idFromPacket( bufferAsPacket.playerColorAndID[ 0 ], bufferAsPacket.playerColorAndID[ 1 ], bufferAsPacket.playerColorAndID[ 2 ] );
+
+	Vector2f newPosition( bufferAsPacket.data.updated.xPosition, bufferAsPacket.data.updated.yPosition );
+	Vector2f newVelocity( bufferAsPacket.data.updated.xVelocity, bufferAsPacket.data.updated.yVelocity );
+	float newOrientationDegrees(  bufferAsPacket.data.updated.yawDegrees );
+
+	//FUTURE EDIT, NEEDS DEAD RECKONING
+
+	auto iter = g_players.begin();
+
+	for( ; iter != g_players.end(); ++ iter )
+	{
+		if( iter->id == idFromPacket )
+		{
+			iter->currentPos = newPosition;
+			iter->currentVelocity = newVelocity;
+			iter->orientationAsDegrees = newOrientationDegrees;
+
+			if( iter->id == g_itPlayerID )
+			{
+				iter->isIt = true;
+				g_itPlayerID = BAD_COLOR;
+			}
+
+			return;
+		}
+	}
+
+
+	if( !( g_localPlayer.id == idFromPacket ) )
+	{
+		player newPlayer;
+
+		newPlayer.currentPos = newPosition;
+		newPlayer.currentVelocity = newVelocity;
+		newPlayer.orientationAsDegrees = newOrientationDegrees;
+
+		if( idFromPacket == g_itPlayerID )
+		{
+			newPlayer.isIt = true;
+			g_itPlayerID = BAD_COLOR;
+		}
+	}
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void OnReceiveGameStart( const CS6Packet& packet )
+{
+	g_localPlayer.id.r = packet.data.gameStart.playerColorAndID[ 0 ];
+	g_localPlayer.id.g = packet.data.gameStart.playerColorAndID[ 1 ];
+	g_localPlayer.id.b = packet.data.gameStart.playerColorAndID[ 2 ];
+
+	g_localPlayer.currentPos = Vector2f( packet.data.gameStart.playerXPosition, packet.data.gameStart.playerYPosition );
+	g_localPlayer.currentVelocity = Vector2f::Zero();
+	g_localPlayer.orientationAsDegrees = 0.f;
+
+	g_itPlayerID.r = packet.data.gameStart.itPlayerColorAndID[ 0 ];
+	g_itPlayerID.g = packet.data.gameStart.itPlayerColorAndID[ 1 ];
+	g_itPlayerID.b = packet.data.gameStart.itPlayerColorAndID[ 2 ];
+
+
+	//Send ack packet to server
+	CS6Packet acknowledgeGameStartPacket;
+	ZeroMemory( &acknowledgeGameStartPacket, sizeof( acknowledgeGameStartPacket ) );
+
+	acknowledgeGameStartPacket.packetType = TYPE_Acknowledge;
+	acknowledgeGameStartPacket.data.acknowledged.packetType = TYPE_GameStart;
+	acknowledgeGameStartPacket.data.acknowledged.packetNumber = packet.packetNumber;
+
+	UDPSendMessageToServer( sendToServerSocket, UDPServerAddressInfo, ( char* )&acknowledgeGameStartPacket, sizeof( acknowledgeGameStartPacket ) );
+
+	g_currentState = STATE_InGame;
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void OnReceiveReset( const CS6Packet& bufferAsPacket )
+{
+	g_localPlayer.currentPos = Vector2f( bufferAsPacket.data.reset.playerXPosition, bufferAsPacket.data.reset.playerYPosition );
+	g_localPlayer.currentVelocity = Vector2f::Zero();
+	g_localPlayer.orientationAsDegrees = 0.f;
+
+
+	playerID itPlayerID( bufferAsPacket.data.reset.itPlayerColorAndID[ 0 ], bufferAsPacket.data.reset.itPlayerColorAndID[ 1 ], bufferAsPacket.data.reset.itPlayerColorAndID[ 2 ] );
+
+	auto iter = g_players.begin(); 
+
+	for( ; iter != g_players.end(); ++ iter )
+	{
+		iter->isIt = false;
+
+		if( iter->id == itPlayerID )
+		{
+			iter->isIt = true;
+		}
+	}
+
+	//Send ack packet to server
+	CS6Packet acknowledgeResetPacket;
+	ZeroMemory( &acknowledgeResetPacket, sizeof( acknowledgeResetPacket ) );
+
+	acknowledgeResetPacket.packetType = TYPE_Acknowledge;
+	acknowledgeResetPacket.data.acknowledged.packetType = TYPE_Reset;
+	acknowledgeResetPacket.data.acknowledged.packetNumber = bufferAsPacket.packetNumber;
+
+	UDPSendMessageToServer( sendToServerSocket, UDPServerAddressInfo, ( char* )&acknowledgeResetPacket, sizeof( acknowledgeResetPacket ) );
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void OnReceiveAck( const CS6Packet& bufferAsPacket )
+{
+	PacketType typeOfAck = bufferAsPacket.data.acknowledged.packetType;
+
+	if( typeOfAck == TYPE_Victory )
+	{
+		//FUTURE EDIT, may need to do something
+	}
+	else if( typeOfAck == TYPE_Acknowledge )
+	{
+		//Think I can leave blank
+	}
+	else if( typeOfAck == TYPE_GameStart )
+	{
+		//Think I can leave this blank
+	}
+	else if( typeOfAck == TYPE_Reset )
+	{
+		//Think I can leave blank
+	}
+	else if( typeOfAck == TYPE_Update )
+	{
+		//Think I can leave blank
+	}
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void OnReceiveVictory( const CS6Packet& bufferAsPacket )
+{
+	UNUSED( bufferAsPacket );
+	//FUTURE EDIT, may want to do something here.
+}
+
+
 

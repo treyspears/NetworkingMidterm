@@ -9,6 +9,55 @@
 #include "Engine/Utilities/EventSystem.hpp"
 
 //-----------------------------------------------------------------------------------------------
+
+struct playerID
+{
+	playerID()
+		: r( 0 )
+		, g( 0 )
+		, b( 0 )
+
+	{
+
+	}
+	playerID( unsigned char red, unsigned char green, unsigned char blue )
+		: r( red )
+		, g( green )
+		, b( blue )
+	{
+
+	}
+
+	bool operator==( const playerID& other )
+	{
+		return r == other.r && g == other.g && b == other.b;
+	}
+
+	unsigned char r;
+	unsigned char g;
+	unsigned char b;
+
+};
+
+struct player
+{
+	player()
+		: id()
+		, currentPos( Vector2f::Zero() )
+		, currentVelocity( Vector2f::Zero() )
+		, orientationAsDegrees( 0.f )
+		, isIt( false )
+	{
+
+	}
+
+	playerID id;
+	Vector2f currentPos;
+	Vector2f currentVelocity;
+	float orientationAsDegrees;
+	bool isIt;
+};
+
 class Clock;
 
 class Game
@@ -24,17 +73,20 @@ public:
 	void Run();
 	void Update();
 	void Render();
+	void RenderPlayers();
+	void RenderPlayer( player& playerToRender );
 	void ProcessInput();
 	void UpdateConsoleLogOnInput();
 	void CreateOpenGLWindow( HINSTANCE applicationInstanceHandle );
 
-	void UpdatePacketAndPotentiallySendToServer();
-	void SendSimplePacketToServer();
+	void PotentiallyRequestGameStartFromServer();
+	void PotentiallySendUpdatePacketToServer();
+	void CheckCollisionAndSendVictoryIfSuccessfulTag();
 	
 	void SetPlayerParameters( NamedProperties& parameters );
 	void SetServerIpFromParameters( NamedProperties& parameters );
 	void SetServerPortFromParameters( NamedProperties& parameters );
-	void UpdateDelayedPosition( NamedProperties& parameters );
+	//void UpdateDelayedPosition( NamedProperties& parameters );
 
 	static void CreateSound( const char* songPath, FMOD::Sound* &sound );
 	static void PlaySound( FMOD::Sound* &sound );
