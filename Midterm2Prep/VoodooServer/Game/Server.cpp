@@ -145,38 +145,53 @@ void Server::SendUpdatePacketsToAllClients()
 	CS6Packet updatePacket;
 
 	updatePacket.packetType = TYPE_Update;
-	updatePacket.timestamp = Time::GetCurrentTimeInSeconds();
 
 	for( auto iter = m_connectedAndActiveClients.begin(); iter != m_connectedAndActiveClients.end(); ++iter )
 	{
 		updatePacket.data.updated = iter->mostRecentUpdateInfo;
-		//updatePacket.packetNumber = iter->numMessagesSent;
 		memcpy( &updatePacket.playerColorAndID, &iter->playerIDAsRGB, sizeof( updatePacket.playerColorAndID ) );
 		
-		BroadCastMessageToAllClients( ( char* )&updatePacket, sizeof( updatePacket ) );
+		BroadCastMessageToAllClients( updatePacket, sizeof( updatePacket ) );
 	}
 }
 
 
 //-----------------------------------------------------------------------------------------------
-void Server::BroadCastMessageToAllClients( void* message, int messageLength )
+void Server::BroadCastMessageToAllClients( const CS6Packet& messageAsPacket, int messageLength )
 {
 	for( auto iter = m_connectedAndActiveClients.begin(); iter != m_connectedAndActiveClients.end(); ++iter )
 	{
-		SendMessageToClient( message, messageLength, *iter );
+		SendMessageToClient( messageAsPacket, *iter );
 	}
 }
 
 
 //-----------------------------------------------------------------------------------------------
-void Server::SendMessageToClient( void* message, int messageLength, const ConnectedClient& clientToSendTo )
+void Server::SendMessageToClient( const CS6Packet& messageAsPacket, ConnectedClient& clientToSendTo )
 {
 	Network& theNetwork = Network::GetInstance();
+
+	CS6Packet packetToSend = messageAsPacket;
+
+	if( messageAsPacket.IsReliablePacket() )
+	{
+		++clientToSendTo.numReliableMessagesSent;
+		packetToSend.packetNumber = clientToSendTo.numReliableMessagesSent;
+
+		clientToSendTo.m_reliablePacketsAwaitingAckBack[ packetToSend.packetNumber ] = packetToSend; 
+	}
+	else
+	{
+		++clientToSendTo.numUnreliableMessagesSent;
+		packetToSend.packetNumber = clientToSendTo.numUnreliableMessagesSent;
+	}
+
+	packetToSend.timestamp = Time::GetCurrentTimeInSeconds();
 
 	theNetwork.SetIPAddressAsStringForConnection( m_listenConnectionID, clientToSendTo.ipAddressAsString );
 	theNetwork.SetPortAsStringForConnection( m_listenConnectionID, clientToSendTo.portAsString );
 
-	theNetwork.SendUDPMessage( message, messageLength, m_listenConnectionID );
+	theNetwork.SendUDPMessage( ( char* )&messageAsPacket, sizeof( messageAsPacket ), m_listenConnectionID );
 }
 
 

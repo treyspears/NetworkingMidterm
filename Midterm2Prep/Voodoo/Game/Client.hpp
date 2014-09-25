@@ -3,12 +3,24 @@
 
 #include <string>
 #include <vector>
+#include <set>
 
 #include "Engine/Networking/Network.hpp"
 #include "Engine/Utilities/EventSystem.hpp"
 
 #include "CS6Packet.hpp"
 #include "ClientPlayer.hpp"
+
+class PacketComparator
+{
+public:
+
+	bool operator () ( const CS6Packet& lhs, const CS6Packet& rhs ) const
+	{
+		return lhs.packetNumber > rhs.packetNumber;
+	}
+};
+
 
 class Client
 {
@@ -43,7 +55,13 @@ private:
 	void		RenderPlayer( const ClientPlayer& playerToRender ) const;
 
 	void		ProcessPacket( const CS6Packet& packet );
+	void		ProcessAnyQueuedReliablePackets();
+
 	void		OnReceivedUpdatePacket( const CS6Packet& updatePacket );
+	void		OnRecieveGameStartPacket( const CS6Packet& updatePacket );
+	void		OnReceiveResetPacket( const CS6Packet& updatePacket );
+	void		OnReceiveVictoryPacket( const CS6Packet& updatePacket );
+	void		OnReceiveAckPacket( const CS6Packet& updatePacket );
 
 	CS6Packet	GetUpdatePacketFromPlayer( const ClientPlayer& player );
 
@@ -62,6 +80,11 @@ private:
 	std::vector< ClientPlayer >	m_otherClientsPlayers;
 
 	float						m_sendPacketsToHostFrequency;
+
+	uint						m_mostRecentlyProcessedUnreliablePacketNum;
+	uint						m_nextExpectedReliablePacketNumToProcess;
+
+	std::set< CS6Packet, PacketComparator > m_queueOfReliablePacketsToParse;
 };
 
 //-----------------------------------------------------------------------------------------------

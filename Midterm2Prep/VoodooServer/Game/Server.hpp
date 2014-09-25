@@ -33,8 +33,8 @@ private:
 	void RemoveInactiveClients();
 
 	void SendUpdatePacketsToAllClients();
-	void BroadCastMessageToAllClients( void* message, int messageLength );
-	void SendMessageToClient( void* message, int messageLength, const ConnectedClient& clientToSendTo );
+	void BroadCastMessageToAllClients( const CS6Packet& messageAsPacket, int messageLength );
+	void SendMessageToClient( const CS6Packet& messageAsPacket, ConnectedClient& clientToSendTo );
 
 	void AddOrUpdateConnectedClient( const CS6Packet& packet );
 

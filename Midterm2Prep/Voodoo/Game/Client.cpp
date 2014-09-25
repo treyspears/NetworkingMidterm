@@ -35,6 +35,8 @@ Client::Client()
 	, m_currentHostPort( STARTING_PORT )
 	, m_sendPacketsToHostFrequency( SEND_TO_HOST_FREQUENCY )
 	, m_localPlayerMovementMagnitude( 0.f )
+	, m_mostRecentlyProcessedUnreliablePacketNum( 0 )
+	, m_nextExpectedReliablePacketNumToProcess( 1 )
 {
 	m_localPlayer.id = LOCAL_PLAYER_ID;
 }
@@ -128,6 +130,7 @@ std::vector< ClientPlayer >& Client::GetOtherClientsPlayers()
 void Client::ReceiveMessagesFromHostIfAny()
 {
 	Network& theNetwork = Network::GetInstance();
+	std::set< CS6Packet, PacketComparator > packetQueueForThisFrame;
 
 	int bytesReceived = 0;
 	CS6Packet receivedPacket;
@@ -141,10 +144,18 @@ void Client::ReceiveMessagesFromHostIfAny()
 
 		if( bytesReceived == sizeof( CS6Packet ) )
 		{
-			ProcessPacket( receivedPacket );
+			packetQueueForThisFrame.insert( receivedPacket );
 		}
 	} 
 	while ( bytesReceived > 0 );
+
+
+	auto packetQueueIterator = packetQueueForThisFrame.begin();
+	
+	for( ; packetQueueIterator != packetQueueForThisFrame.end(); ++packetQueueIterator )
+	{
+		ProcessPacket( *packetQueueIterator );
+	}
 }
 
 
@@ -216,7 +227,71 @@ void Client::RenderPlayer( const ClientPlayer& playerToRender ) const
 //-----------------------------------------------------------------------------------------------
 void Client::ProcessPacket( const CS6Packet& packet )
 {
-	OnReceivedUpdatePacket( packet );
+	bool shouldProcessReliablePacketsInQueue = false;
+
+	if( packet.IsReliablePacket() )
+	{
+		//FUTURE EDIT: Ack to Server that client received reliable packet!
+
+		if( packet.packetNumber > m_nextExpectedReliablePacketNumToProcess )
+		{
+			m_queueOfReliablePacketsToParse.insert( packet );
+			return;
+		}
+		else
+		{
+			++m_nextExpectedReliablePacketNumToProcess;
+			shouldProcessReliablePacketsInQueue = true;	
+		}
+	}
+	else
+	{
+		if( packet.packetNumber < m_mostRecentlyProcessedUnreliablePacketNum )
+		{
+			return;
+		}
+	}
+
+	PacketType typeOfPacket = packet.packetType;
+
+	if( typeOfPacket == TYPE_Update )
+	{
+		OnReceivedUpdatePacket( packet );
+	}
+	else if( typeOfPacket == TYPE_Reset )
+	{
+
+	}
+	else if( typeOfPacket == TYPE_Acknowledge )
+	{
+
+	}
+	else if( typeOfPacket == TYPE_GameStart )
+	{
+
+	}
+	else if( typeOfPacket == TYPE_Victory )
+	{
+
+	}
+
+	//actually may not need this since we return from if statement
+	if( shouldProcessReliablePacketsInQueue )
+	{
+		ProcessAnyQueuedReliablePackets();
+	}
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void Client::ProcessAnyQueuedReliablePackets()
+{
+	while( !m_queueOfReliablePacketsToParse.empty() || m_queueOfReliablePacketsToParse.begin()->packetNumber > m_mostRecentlyProcessedReliablePacketNum )
+	{
+		ProcessPacket( *m_queueOfReliablePacketsToParse.begin() );
+
+		m_queueOfReliablePacketsToParse.erase( m_queueOfReliablePacketsToParse.begin() );
+	}
 }
 
 
@@ -262,6 +337,34 @@ void Client::OnReceivedUpdatePacket( const CS6Packet& updatePacket )
 
 		m_otherClientsPlayers.push_back( newPlayer );
 	}
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void Client::OnRecieveGameStartPacket( const CS6Packet& updatePacket )
+{
+
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void Client::OnReceiveResetPacket( const CS6Packet& updatePacket )
+{
+
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void Client::OnReceiveVictoryPacket( const CS6Packet& updatePacket )
+{
+
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void Client::OnReceiveAckPacket( const CS6Packet& updatePacket )
+{
+
 }
 
 

@@ -56,13 +56,10 @@ void ClientPlayer::SeekTarget()
 	Vector2f currentVelocityDirection = currentVelocity;
 	currentVelocityDirection.Normalize();
 
-	Vector2f newVelocityDirection = currentToExtrapolatedDirVector;// - currentVelocityDirection;
+	Vector2f newVelocityDirection = currentToExtrapolatedDirVector;
 
 	currentVelocity = newVelocityDirection * PLAYER_SPEED * deltaSeconds * GetFloatMin( 1.f, Vector2f::Distance( extrapolatedPosition, currentPos ) * 0.5f );
 	currentPos += currentVelocity * deltaSeconds;
-
-	//currentVelocity = desiredVelocity;
-	//currentPos = desiredPos;
 }
 
 

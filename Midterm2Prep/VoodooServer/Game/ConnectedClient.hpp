@@ -1,8 +1,11 @@
 #ifndef CONNECTED_CLIENT_HPP
 #define CONNECTED_CLIENT_HPP
 
+#include <map>
+
 #include "CS6Packet.hpp"
 #include "Engine/Primitives/Color.hpp"
+
 
 typedef Color PlayerID;
 
@@ -23,7 +26,10 @@ public:
 	PlayerID	 playerIDAsRGB;
 
 	float		 timeSinceLastReceivedMessage;
-	int			 numMessagesSent;
+	int			 numUnreliableMessagesSent;
+	int			 numReliableMessagesSent;
+
+	std::map< uint, CS6Packet > m_reliablePacketsAwaitingAckBack;
 };
 
 #endif

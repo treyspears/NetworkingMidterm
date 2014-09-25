@@ -87,6 +87,16 @@ struct CS6Packet
 		UpdatePacket updated;
 		VictoryPacket victorious;
 	} data;
+
+	inline bool IsReliablePacket() const;
 };
 
+
+//-----------------------------------------------------------------------------------------------
+inline bool CS6Packet::IsReliablePacket() const
+{
+	bool result = packetType == TYPE_GameStart || packetType == TYPE_Reset;
+
+	return result;
+}
 #endif //INCLUDED_CS6_PACKET_HPP
