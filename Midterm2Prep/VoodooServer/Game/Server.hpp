@@ -30,6 +30,7 @@ private:
 	void ReceiveMessagesFromClientsIfAny();
 	void ProcessPacket( const CS6Packet& packet );
 	void OnReceiveUpdatePacket( const CS6Packet& packet );
+	void RemoveInactiveClients();
 
 	void SendUpdatePacketsToAllClients();
 	void BroadCastMessageToAllClients( void* message, int messageLength );

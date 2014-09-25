@@ -41,8 +41,28 @@ void ClientPlayer::SetCurrentVelocityAndPositionFromMagnitude( float magnitude )
 //-----------------------------------------------------------------------------------------------
 void ClientPlayer::SeekTarget()
 {
-	currentVelocity = desiredVelocity;
-	currentPos = desiredPos;
+	Clock& appClock = Clock::GetMasterClock();
+	float deltaSeconds = static_cast< float >( appClock.m_currentDeltaSeconds );
+
+	Vector2f extrapolatedPosition = desiredPos;
+	Vector2f extrapolatedVelocityDirection = desiredVelocity;
+
+	extrapolatedVelocityDirection.Normalize();
+	extrapolatedPosition += extrapolatedVelocityDirection * PLAYER_SPEED * deltaSeconds;
+
+	Vector2f currentToExtrapolatedDirVector = extrapolatedPosition - currentPos;
+	currentToExtrapolatedDirVector.Normalize();
+
+	Vector2f currentVelocityDirection = currentVelocity;
+	currentVelocityDirection.Normalize();
+
+	Vector2f newVelocityDirection = currentToExtrapolatedDirVector;// - currentVelocityDirection;
+
+	currentVelocity = newVelocityDirection * PLAYER_SPEED * deltaSeconds * GetFloatMin( 1.f, Vector2f::Distance( extrapolatedPosition, currentPos ) * 0.5f );
+	currentPos += currentVelocity * deltaSeconds;
+
+	//currentVelocity = desiredVelocity;
+	//currentPos = desiredPos;
 }
 
 
