@@ -32,6 +32,7 @@ public:
 	Vector2f desiredVelocity;
 
 	float	 orientationAsDegrees;
+	bool	 isIt;
 
 	std::vector< Vector2f > m_shipVertexArray;
 };

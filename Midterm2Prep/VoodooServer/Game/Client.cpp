@@ -225,12 +225,12 @@ void Client::RenderPlayer( const ClientPlayer& playerToRender ) const
 //-----------------------------------------------------------------------------------------------
 void Client::ProcessPacket( const CS6Packet& packet )
 {
-	OnReceivedUpdatePacket( packet );
+	OnReceiveUpdatePacket( packet );
 }
 
 
 //-----------------------------------------------------------------------------------------------
-void Client::OnReceivedUpdatePacket( const CS6Packet& updatePacket )
+void Client::OnReceiveUpdatePacket( const CS6Packet& updatePacket )
 {
 	PlayerID idFromPacket;
 	memcpy( &idFromPacket, &updatePacket.playerColorAndID, sizeof( updatePacket.playerColorAndID ) );

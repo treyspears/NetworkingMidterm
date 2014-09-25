@@ -22,6 +22,12 @@ public:
 };
 
 
+enum ClientState
+{
+	CLIENT_GAME_NOT_STARTED,
+	CLIENT_IN_GAME
+};
+
 class Client
 {
 
@@ -49,7 +55,10 @@ private:
 
 	void		ReceiveMessagesFromHostIfAny();
 	void		UpdatePlayers();
+	void		CheckForCollision();
+	void		PotentiallySendGameStartAckPacketToServer();
 	void		PotentiallySendUpdatePacketToServer();
+	void		AckBackSuccessfulReliablePacketReceive( const CS6Packet& packet );
 
 	void		RenderPlayers() const;
 	void		RenderPlayer( const ClientPlayer& playerToRender ) const;
@@ -57,18 +66,21 @@ private:
 	void		ProcessPacket( const CS6Packet& packet );
 	void		ProcessAnyQueuedReliablePackets();
 
-	void		OnReceivedUpdatePacket( const CS6Packet& updatePacket );
-	void		OnRecieveGameStartPacket( const CS6Packet& updatePacket );
+	void		OnReceiveUpdatePacket( const CS6Packet& updatePacket );
+	void		OnReceiveGameStartPacket( const CS6Packet& updatePacket );
 	void		OnReceiveResetPacket( const CS6Packet& updatePacket );
 	void		OnReceiveVictoryPacket( const CS6Packet& updatePacket );
 	void		OnReceiveAckPacket( const CS6Packet& updatePacket );
 
+	CS6Packet	GetGameStartAckPacket();
 	CS6Packet	GetUpdatePacketFromPlayer( const ClientPlayer& player );
 
 	void		SetPlayerParameters( NamedProperties& parameters );
 	void		SetServerIpFromParameters( NamedProperties& parameters );
 	void		SetServerPortFromParameters( NamedProperties& parameters );
 
+	ClientState					m_currentState;
+	PlayerID					m_currentItPlayerID;
 
 	int							m_connectionToHostID;
 

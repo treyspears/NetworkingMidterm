@@ -43,7 +43,7 @@ private:
 	void		RenderPlayer( const ClientPlayer& playerToRender ) const;
 
 	void		ProcessPacket( const CS6Packet& packet );
-	void		OnReceivedUpdatePacket( const CS6Packet& updatePacket );
+	void		OnReceiveUpdatePacket( const CS6Packet& updatePacket );
 
 	CS6Packet	GetUpdatePacketFromPlayer( const ClientPlayer& player );
 

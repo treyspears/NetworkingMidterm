@@ -5,6 +5,7 @@
 #include "Engine/Utilities/CommonUtilities.hpp"
 
 const float PLAYER_SPEED = 3000.f;
+const float EXTRA_PLAYER_SPEED = -PLAYER_SPEED * 0.1f;
 const float ANGULAR_VELOCITY = 300.f;
 
 
@@ -16,6 +17,7 @@ ClientPlayer::ClientPlayer()
 	, desiredPos( Vector2f::Zero() )
 	, desiredVelocity( Vector2f::Zero() )
 	, orientationAsDegrees( 0.f )
+	, isIt( false )
 {
 	CreateShipVerts();
 }
@@ -25,12 +27,18 @@ ClientPlayer::ClientPlayer()
 void ClientPlayer::SetCurrentVelocityAndPositionFromMagnitude( float magnitude )
 {
 	Clock& clock = Clock::GetMasterClock();
+	float speed = PLAYER_SPEED;
+
+	if( isIt )
+	{
+		speed += EXTRA_PLAYER_SPEED;
+	}
 
 	float orientationRadians = PI_OVER_180 * orientationAsDegrees;
 	Vector2f deltaVelocity;
 
 	deltaVelocity = Vector2f( cos( orientationRadians ), sin( orientationRadians ) );
-	deltaVelocity *= PLAYER_SPEED * magnitude;
+	deltaVelocity *= speed * magnitude;
 
 	currentVelocity =deltaVelocity * static_cast< float >( clock.m_currentDeltaSeconds );
 
@@ -43,6 +51,12 @@ void ClientPlayer::SeekTarget()
 {
 	Clock& appClock = Clock::GetMasterClock();
 	float deltaSeconds = static_cast< float >( appClock.m_currentDeltaSeconds );
+	float speed = PLAYER_SPEED;
+
+	if( isIt )
+	{
+		speed += EXTRA_PLAYER_SPEED;
+	}
 
 	Vector2f extrapolatedPosition = desiredPos;
 	Vector2f extrapolatedVelocityDirection = desiredVelocity;
@@ -58,7 +72,7 @@ void ClientPlayer::SeekTarget()
 
 	Vector2f newVelocityDirection = currentToExtrapolatedDirVector;
 
-	currentVelocity = newVelocityDirection * PLAYER_SPEED * deltaSeconds * GetFloatMin( 1.f, Vector2f::Distance( extrapolatedPosition, currentPos ) * 0.5f );
+	currentVelocity = newVelocityDirection * speed * deltaSeconds * GetFloatMin( 1.f, Vector2f::Distance( extrapolatedPosition, currentPos ) * 0.5f );
 	currentPos += currentVelocity * deltaSeconds;
 }
 
@@ -71,6 +85,7 @@ void ClientPlayer::Reset()
 	desiredPos = Vector2f::Zero();
 	desiredVelocity = Vector2f::Zero();
 	orientationAsDegrees = 0.f;
+	isIt = false;
 }
 
 
@@ -111,6 +126,11 @@ void ClientPlayer::RenderShip() const
 	OpenGLRenderer::PushMatrix();
 	OpenGLRenderer::Translatef( currentPos.x, currentPos.y, 0.f );
 	OpenGLRenderer::Rotatef( orientationAsDegrees, 0.f, 0.f, 1.f );
+
+	if( isIt )
+	{
+		OpenGLRenderer::Scalef( 1.25f, 1.25f, 0.f );
+	}
 
 	OpenGLRenderer::Begin( GL_LINE_LOOP );
 	{

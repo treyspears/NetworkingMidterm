@@ -1,6 +1,7 @@
 #include "Server.hpp"
 
 #include <sstream>
+#include <algorithm>
 
 #include "Engine/Rendering/OpenGLRenderer.hpp"
 #include "Engine/Rendering/BitmapFont.hpp"
@@ -9,12 +10,15 @@
 #include "Engine/Utilities/Time.hpp"
 
 const float MAX_SECONDS_OF_INACTIVITY = 5.f;
+const float RESEND_RELIABLE_PACKET_TIME = 2.f;
 const float SEND_DELAY = 0.05f;
 
 const char* IP_AS_STRING = "127.0.0.1";
 const u_short STARTING_PORT = 5000;
 
 float g_currentSendElapsedTime = 0.f;
+
+const PlayerID BAD_IT_PLAYER = Color( Black );
 
 //-----------------------------------------------------------------------------------------------
 //Public Methods
@@ -23,6 +27,7 @@ Server::Server()
 	: m_listenConnectionID( 0 )
 	, m_currentServerIPAddressAsString( IP_AS_STRING )
 	, m_currentServerPort( STARTING_PORT )
+	, m_currentItPlayerID( BAD_IT_PLAYER )
 {
 
 }
@@ -61,6 +66,7 @@ void Server::Update()
 
 	ReceiveMessagesFromClientsIfAny();
 	RemoveInactiveClients();
+	ResendAnyGuaranteedPacketsThatHaveTimedOut();
 	SendUpdatePacketsToAllClients();
 
 	g_currentSendElapsedTime += static_cast< float >( appClock.m_currentDeltaSeconds );
@@ -93,7 +99,6 @@ void Server::ReceiveMessagesFromClientsIfAny()
 
 		if( bytesReceived == sizeof( CS6Packet ) )
 		{
-			AddOrUpdateConnectedClient( receivedPacket ); //this will need to be moved to on a received ack of type ack!
 			ProcessPacket( receivedPacket );
 		}
 	} 
@@ -104,14 +109,96 @@ void Server::ReceiveMessagesFromClientsIfAny()
 //-----------------------------------------------------------------------------------------------
 void Server::ProcessPacket( const CS6Packet& packet )
 {
+	PacketType typeOfPacket = packet.packetType;
 
+	if( typeOfPacket == TYPE_Update )
+	{
+		OnReceiveUpdatePacket( packet );
+	}
+	else if( typeOfPacket == TYPE_Reset )
+	{
+		//OnReceiveResetPacket( packet );
+	}
+	else if( typeOfPacket == TYPE_Acknowledge )
+	{
+		OnReceiveAckPacket( packet );
+	}
+	else if( typeOfPacket == TYPE_GameStart )
+	{
+		//OnReceiveGameStartPacket( packet );
+	}
+	else if( typeOfPacket == TYPE_Victory )
+	{
+		//OnReceiveVictoryPacket( packet );
+	}
+
+
+	 //this will need to be moved to on a received ack of type ack!
 }
 
 
 //-----------------------------------------------------------------------------------------------
 void Server::OnReceiveUpdatePacket( const CS6Packet& packet )
 {
+	AddOrUpdateConnectedClient( packet );
+}
 
+
+//-----------------------------------------------------------------------------------------------
+void Server::OnReceiveAckPacket( const CS6Packet& packet )
+{
+	PacketType typeOfAck = packet.data.acknowledged.packetType;
+
+	if( typeOfAck == TYPE_Acknowledge )
+	{
+		OnAckAcknowledge( packet );
+	}
+	else if( typeOfAck == TYPE_GameStart )
+	{
+		//FUTURE EDIT
+	}
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void Server::OnAckAcknowledge( const CS6Packet& packet )
+{
+	AddOrUpdateConnectedClient( packet );
+}
+
+
+//-----------------------------------------------------------------------------------------------
+void Server::OnAckGameStart( const CS6Packet& packet )
+{
+	std::string ipAddressOfClient = "";
+	std::string portAsString = "";
+
+	Network& theNetwork = Network::GetInstance();
+
+	ipAddressOfClient = theNetwork.GetIPAddressAsStringFromConnection( m_listenConnectionID );
+	portAsString = theNetwork.GetPortAsStringFromConnection( m_listenConnectionID );
+
+	if( ipAddressOfClient == "" || portAsString == "" )
+	{
+		return;
+	}
+
+	std::string idOfClient = portAsString + ipAddressOfClient;
+
+	auto foundIter = m_connectedAndActiveClients.begin();
+
+	for( ; foundIter != m_connectedAndActiveClients.end(); ++foundIter )
+	{
+		if( foundIter->clientID == idOfClient )
+		{
+			break;
+		}
+	}
+
+	if( foundIter != m_connectedAndActiveClients.end() )
+	{
+		foundIter->m_reliablePacketsAwaitingAckBack.erase( packet.data.acknowledged.packetNumber );
+	}
 }
 
 
@@ -140,6 +227,34 @@ void Server::RemoveInactiveClients()
 
 
 //-----------------------------------------------------------------------------------------------
+void Server::ResendAnyGuaranteedPacketsThatHaveTimedOut()
+{
+	CS6Packet packetToSend;
+	Network& theNetwork = Network::GetInstance();
+
+	float currentTime = Time::GetCurrentTimeInSeconds();
+
+	for( auto iter = m_connectedAndActiveClients.begin(); iter != m_connectedAndActiveClients.end(); ++iter )
+	{
+		for( auto guaranteedPacketIter = iter->m_reliablePacketsAwaitingAckBack.begin(); guaranteedPacketIter != iter->m_reliablePacketsAwaitingAckBack.end(); ++ guaranteedPacketIter )
+		{
+			if( currentTime - guaranteedPacketIter->second.timestamp > RESEND_RELIABLE_PACKET_TIME )
+			{
+				packetToSend = guaranteedPacketIter->second;
+
+				packetToSend.timestamp = Time::GetCurrentTimeInSeconds();
+
+				theNetwork.SetIPAddressAsStringForConnection( m_listenConnectionID, iter->ipAddressAsString );
+				theNetwork.SetPortAsStringForConnection( m_listenConnectionID,iter->portAsString );
+
+				theNetwork.SendUDPMessage( ( char* )&packetToSend, sizeof( packetToSend ), m_listenConnectionID );
+			}
+		}
+	}
+};
+
+
+//-----------------------------------------------------------------------------------------------
 void Server::SendUpdatePacketsToAllClients()
 {
 	CS6Packet updatePacket;
@@ -164,6 +279,29 @@ void Server::BroadCastMessageToAllClients( const CS6Packet& messageAsPacket, int
 		SendMessageToClient( messageAsPacket, *iter );
 	}
 }
+
+
+//-----------------------------------------------------------------------------------------------
+void Server::SendAGameStartPacketToNewClient( ConnectedClient& clientToSendTo )
+{
+	CS6Packet packetToSend;
+
+	ZeroMemory( &packetToSend, sizeof( packetToSend ) );
+
+	packetToSend.packetType = TYPE_GameStart;
+	packetToSend.data.gameStart.playerXPosition = rand() % 500;
+	packetToSend.data.gameStart.playerYPosition = rand() % 500;
+
+	if( m_connectedAndActiveClients.size() <= 1 )
+	{
+		m_currentItPlayerID = clientToSendTo.playerIDAsRGB;
+	}
+
+	memcpy( &packetToSend.data.gameStart.itPlayerColorAndID, &m_currentItPlayerID, sizeof( packetToSend.data.gameStart.itPlayerColorAndID ) );
+	memcpy( &packetToSend.data.gameStart.playerColorAndID, &clientToSendTo.playerIDAsRGB, sizeof( packetToSend.data.gameStart.playerColorAndID ) );
+
+	SendMessageToClient( packetToSend, clientToSendTo );
+};
 
 
 //-----------------------------------------------------------------------------------------------
@@ -231,11 +369,15 @@ void Server::AddOrUpdateConnectedClient( const CS6Packet& packet )
 		}
 	}
 
+	if( packet.packetType != TYPE_Acknowledge || packet.data.acknowledged.packetType != TYPE_Acknowledge )
+	{
+		return;
+	}
 
 	if( iter == m_connectedAndActiveClients.end() )
 	{
 		ConnectedClient newConnectedClient( ipAddressOfClient, portAsString );
-		memcpy( &newConnectedClient.playerIDAsRGB, &packet.playerColorAndID, sizeof( packet.playerColorAndID ) );
+		newConnectedClient.playerIDAsRGB = Color( uchar( m_connectedAndActiveClients.size() ) );
 
 		if( packet.packetType == TYPE_Update )
 		{
@@ -243,21 +385,9 @@ void Server::AddOrUpdateConnectedClient( const CS6Packet& packet )
 		}
 
 		m_connectedAndActiveClients.push_back( newConnectedClient );
+
+		SendAGameStartPacketToNewClient( newConnectedClient );
 	}
-
-	//if( iter == m_connectedAndActiveClients.end() )
-	//{
-	//	ConnectedClient newConnectedClient( ipAddressOfClient, portAsString );
-	//	newConnectedClient.playerIDAsRGB = Color( uchar( m_connectedAndActiveClients.size() ) );
-
-	//	memcpy( &newConnectedClient.playerIDAsRGB, &newConnectedClient.playerIDAsRGB, sizeof( packet.playerColorAndID ) );
-
-	//	if( packet.packetType == TYPE_Update )
-	//	{
-	//		newConnectedClient.mostRecentUpdateInfo = packet.data.updated;
-	//	}
-
-	//	m_
 
 	//Loop thru active clients and update the client whose id matches, else add new client to list
 
