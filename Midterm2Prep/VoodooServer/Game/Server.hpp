@@ -35,7 +35,6 @@ private:
 	void BroadCastMessageToAllClients( void* message, int messageLength );
 	void SendMessageToClient( void* message, int messageLength, const ConnectedClient& clientToSendTo );
 
-	void RemoveInactiveClients();
 	void AddOrUpdateConnectedClient( const CS6Packet& packet );
 
 	void RenderConnectedClients() const;

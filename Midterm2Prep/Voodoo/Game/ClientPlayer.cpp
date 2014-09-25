@@ -41,32 +41,8 @@ void ClientPlayer::SetCurrentVelocityAndPositionFromMagnitude( float magnitude )
 //-----------------------------------------------------------------------------------------------
 void ClientPlayer::SeekTarget()
 {
-	Vector2f currentToDesiredVector = desiredPos - currentPos;
-	Vector2f currentVelocityDirection = currentVelocity;
-
-	currentToDesiredVector.Normalize();
-	currentVelocityDirection.Normalize();
-
-	Vector2f newVelocityDirection = currentToDesiredVector;// - currentVelocityDirection;
-
-	newVelocityDirection.Normalize();
-
-	Clock& clock = Clock::GetMasterClock();
-
-	if( Vector2f::Distance( currentPos, desiredPos ) > 1.f )
-	{
-		currentVelocity = newVelocityDirection * PLAYER_SPEED * static_cast< float >( clock.m_currentDeltaSeconds );
-		if( newVelocityDirection != Vector2f::Zero() )
-		{
-			orientationAsDegrees = atan2( newVelocityDirection.y, newVelocityDirection.x ) * _180_OVER_PI;
-		}
-
-		currentPos += currentVelocity * static_cast< float >( clock.m_currentDeltaSeconds );
-	}
-	else
-	{
-		currentVelocity = Vector2f::Zero();
-	}
+	currentVelocity = desiredVelocity;
+	currentPos = desiredPos;
 }
 
 

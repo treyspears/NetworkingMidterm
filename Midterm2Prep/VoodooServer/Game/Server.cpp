@@ -60,7 +60,6 @@ void Server::Update()
 	Clock& appClock = Clock::GetMasterClock();
 
 	ReceiveMessagesFromClientsIfAny();
-	RemoveInactiveClients();
 	SendUpdatePacketsToAllClients();
 
 	g_currentSendElapsedTime += static_cast< float >( appClock.m_currentDeltaSeconds );
@@ -153,32 +152,6 @@ void Server::SendMessageToClient( void* message, int messageLength, const Connec
 	theNetwork.SetPortAsStringForConnection( m_listenConnectionID, clientToSendTo.portAsString );
 
 	theNetwork.SendUDPMessage( message, messageLength, m_listenConnectionID );
-}
-
-
-//-----------------------------------------------------------------------------------------------
-void Server::RemoveInactiveClients()
-{
-	Clock& appClock = Clock::GetMasterClock();
-	float deltaSeconds = static_cast< float >( appClock.m_currentDeltaSeconds );
-
-	for( int i = 0; i < static_cast< int >( m_connectedAndActiveClients.size() ); ++i )
-	{
-		m_connectedAndActiveClients[ i ].timeSinceLastReceivedMessage += deltaSeconds;
-
-		if( m_connectedAndActiveClients[ i ].timeSinceLastReceivedMessage >= MAX_SECONDS_OF_INACTIVITY )
-		{
-			ConnectedClient temp = m_connectedAndActiveClients.back();
-
-			if( i < static_cast< int >( m_connectedAndActiveClients.size() ) - 1 )
-			{
-				m_connectedAndActiveClients[ i ] = temp;
-			}
-
-			m_connectedAndActiveClients.pop_back();
-			--i;
-		}
-	}
 }
 
 

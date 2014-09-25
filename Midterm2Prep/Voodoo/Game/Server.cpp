@@ -1,5 +1,10 @@
 #include "Server.hpp"
 
+#include <sstream>
+
+#include "Engine/Rendering/OpenGLRenderer.hpp"
+#include "Engine/Rendering/BitmapFont.hpp"
+#include "Engine/Primitives/Vector3.hpp"
 #include "Engine/Utilities/Clock.hpp"
 #include "Engine/Utilities/Time.hpp"
 
@@ -55,7 +60,6 @@ void Server::Update()
 	Clock& appClock = Clock::GetMasterClock();
 
 	ReceiveMessagesFromClientsIfAny();
-	RemoveInactiveClients();
 	SendUpdatePacketsToAllClients();
 
 	g_currentSendElapsedTime += static_cast< float >( appClock.m_currentDeltaSeconds );
@@ -123,7 +127,7 @@ void Server::SendUpdatePacketsToAllClients()
 		updatePacket.data.updated = iter->mostRecentUpdateInfo;
 		//updatePacket.packetNumber = iter->numMessagesSent;
 		memcpy( &updatePacket.playerColorAndID, &iter->playerIDAsRGB, sizeof( updatePacket.playerColorAndID ) );
-		
+
 		BroadCastMessageToAllClients( ( char* )&updatePacket, sizeof( updatePacket ) );
 	}
 }
@@ -148,32 +152,6 @@ void Server::SendMessageToClient( void* message, int messageLength, const Connec
 	theNetwork.SetPortAsStringForConnection( m_listenConnectionID, clientToSendTo.portAsString );
 
 	theNetwork.SendUDPMessage( message, messageLength, m_listenConnectionID );
-}
-
-
-//-----------------------------------------------------------------------------------------------
-void Server::RemoveInactiveClients()
-{
-	Clock& appClock = Clock::GetMasterClock();
-	float deltaSeconds = static_cast< float >( appClock.m_currentDeltaSeconds );
-
-	for( int i = 0; i < static_cast< int >( m_connectedAndActiveClients.size() ); ++i )
-	{
-		if( m_connectedAndActiveClients[ i ].timeSinceLastReceivedMessage >= MAX_SECONDS_OF_INACTIVITY )
-		{
-			ConnectedClient temp = m_connectedAndActiveClients.back();
-
-			if( i < static_cast< int >( m_connectedAndActiveClients.size() ) - 1 )
-			{
-				m_connectedAndActiveClients[ i ] = temp;
-			}
-
-			m_connectedAndActiveClients.pop_back();
-			--i;
-		}
-
-		m_connectedAndActiveClients[ i ].timeSinceLastReceivedMessage += deltaSeconds;
-	}
 }
 
 
@@ -208,7 +186,7 @@ void Server::AddOrUpdateConnectedClient( const CS6Packet& packet )
 			{
 				iter->mostRecentUpdateInfo = packet.data.updated;
 			}
-			
+
 			break;
 		}
 	}
@@ -227,6 +205,20 @@ void Server::AddOrUpdateConnectedClient( const CS6Packet& packet )
 		m_connectedAndActiveClients.push_back( newConnectedClient );
 	}
 
+	//if( iter == m_connectedAndActiveClients.end() )
+	//{
+	//	ConnectedClient newConnectedClient( ipAddressOfClient, portAsString );
+	//	newConnectedClient.playerIDAsRGB = Color( uchar( m_connectedAndActiveClients.size() ) );
+
+	//	memcpy( &newConnectedClient.playerIDAsRGB, &newConnectedClient.playerIDAsRGB, sizeof( packet.playerColorAndID ) );
+
+	//	if( packet.packetType == TYPE_Update )
+	//	{
+	//		newConnectedClient.mostRecentUpdateInfo = packet.data.updated;
+	//	}
+
+	//	m_
+
 	//Loop thru active clients and update the client whose id matches, else add new client to list
 
 }
@@ -236,5 +228,44 @@ void Server::AddOrUpdateConnectedClient( const CS6Packet& packet )
 void Server::RenderConnectedClients() const
 {
 	//do this later
+
+	const float fontSize = 24.f;
+	const Vector3f offsetVector( 0.f, fontSize, 0.f );
+	const Vector3f initialPosition( 0.f, 650.f, 0.f ); //LAZY
+
+	BitmapFont* font = BitmapFont::CreateOrGetFont( "Data/Fonts/MainFont_EN_00.png", "Data/Fonts/MainFont_EN.FontDef.xml" );
+	std::ostringstream outputStringStream;
+	std::string stringToRender;
+
+	Vector3f textPosition = initialPosition;
+
+	outputStringStream.str( "" );
+	outputStringStream << "Connected Clients:";
+	stringToRender = outputStringStream.str();
+
+	OpenGLRenderer::RenderText( stringToRender, font, fontSize, textPosition );
+	textPosition -= offsetVector;
+
+	auto iter = m_connectedAndActiveClients.begin();
+
+	for( ; iter != m_connectedAndActiveClients.end(); ++iter )
+	{
+		outputStringStream.str( "" );
+		outputStringStream << "Client Address: " << iter->ipAddressAsString << ", Port: " << iter->portAsString;
+		stringToRender = outputStringStream.str();
+
+		OpenGLRenderer::RenderText( stringToRender, font, fontSize, textPosition );
+		textPosition -= offsetVector;
+	}
+
+	if( m_connectedAndActiveClients.size() == 0 )
+	{
+		outputStringStream.str( "" );
+		outputStringStream << "None.";
+		stringToRender = outputStringStream.str();
+
+		OpenGLRenderer::RenderText( stringToRender, font, fontSize, textPosition );
+	}
+
 
 }
